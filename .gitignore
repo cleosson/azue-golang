@@ -13,3 +13,10 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# Certificates
+*.pem
+*.pkcs12
+
+# Goland
+.idea
