@@ -1,2 +1,2 @@
-# azue-golang
+# azure-golang
 Testing Azure Golang client
