@@ -1,2 +1,2 @@
 # azue-golang
-POC to use Azure Golang client
+Testing Azure Golang client
