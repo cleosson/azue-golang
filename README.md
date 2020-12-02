@@ -1,7 +1,6 @@
 # azure-golang
 ## Steps to set up the environment
-Creating Service Principal using [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) 
-Create the service principal with certificate
+Creating Service Principal using [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)  with certificate
 ```
 $: az ad sp create-for-rbac --name application --create-cert --sdk-auth
 ```
