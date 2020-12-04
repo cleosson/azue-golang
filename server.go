@@ -9,42 +9,35 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-06-30/compute"
+	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2020-11-01/containerservice"
 	"github.com/Azure/azure-sdk-for-go/services/dns/mgmt/2018-05-01/dns"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-06-01/network"
 	"github.com/Azure/azure-sdk-for-go/services/privatedns/mgmt/2018-09-01/privatedns"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 )
 
-type items struct {
+type Items struct {
 	resourceGroup string
-	networkIntefaces []string
-	frontends []string
-	publicIpAddresses []string
-	itemType string
+	array []string
 }
 
 const (
-	AZURE_SUBSCRITPION = "AZURE_SUBSCRITPION"
-	LOAD_BALANCE = "LOAD_BALANCE"
-	VIRTUAL_MACHINE = "VIRTUAL_MACHINE"
+	AzureSubscritpion   	= "AZURE_SUBSCRITPION"
+	ResourceGroupIdx    	= 4
+	PublicIpAddressIdx  	= 8
+	NetworkInterfaceIdx 	= 8
+	SecurityGroupIdx    	= 8
+	SubnetIdx				= 10
 )
 
-var (
-	subscriptionId = ""
-    itemMap = make(map[string]items)
-    resourceGroupIdx = 4
-    publicIpAddressidx = 8
-    networktInterfaceIdx = 8
-    frontendIdx = 10
-)
-
-func getVirtualMachine(authorizer autorest.Authorizer) {
+func getVirtualMachine(authorizer autorest.Authorizer) (map[string]Items){
 	fmt.Printf("\n##########################\n##########################\n VIRTUAL MACHINE \n##########################\n##########################\n")
-	vmClient := compute.NewVirtualMachinesClient(subscriptionId)
+	vmClient := compute.NewVirtualMachinesClient(os.Getenv(AzureSubscritpion))
 	vmClient.Authorizer = authorizer
 	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
 	defer cancel()
 
+	vmMap := make(map[string]Items)
 	resultList, err := vmClient.ListAll(ctx, "false")
 	if err != nil {
 		fmt.Printf("Virtual Machine Error: %v\n", err)
@@ -61,13 +54,12 @@ func getVirtualMachine(authorizer autorest.Authorizer) {
 					fmt.Printf("Virtual Machine Zones: %v\n", v)
 				}
 			}
-			resourceGroup := strings.Split(*result.ID, "/")[resourceGroupIdx]
+			resourceGroup := strings.Split(*result.ID, "/")[ResourceGroupIdx]
 			fmt.Printf("Resource Group: %v\n", resourceGroup)
 
 			networkInterfaceList := []string {}
 			for _, networkInterface := range *result.NetworkProfile.NetworkInterfaces {
-				//	frontend := strings.Split(*(*result.FrontendIPConfigurations)[0].ID, "/")[frontendIdx]
-				tmp := strings.Split(*networkInterface.ID, "/")[networktInterfaceIdx]
+				tmp := strings.Split(*networkInterface.ID, "/")[NetworkInterfaceIdx]
 				networkInterfaceList = append(networkInterfaceList, tmp)
 			}
 			fmt.Printf("Network Interfaces: %v\n", networkInterfaceList)
@@ -77,21 +69,24 @@ func getVirtualMachine(authorizer autorest.Authorizer) {
 				}
 			}
 
-			itemMap[*result.Name] = items { resourceGroup, networkInterfaceList, []string{}, []string{}, VIRTUAL_MACHINE}
+			vmMap[*result.Name] = Items { resourceGroup, networkInterfaceList}
 		}
 	}
+
+	return vmMap
 }
 
-func getNetworkInterface(authorizer autorest.Authorizer) {
+func getNetworkInterface(authorizer autorest.Authorizer, vmMap map[string]Items) (map[string]Items) {
 	fmt.Printf("\n##########################\n##########################\n NETWORK INTERFACE\n##########################\n##########################\n")
-	client := network.NewInterfacesClient(subscriptionId)
+	client := network.NewInterfacesClient(os.Getenv(AzureSubscritpion))
 	client.Authorizer = authorizer
 	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
 	defer cancel()
 
-	for name,item := range itemMap {
-		for _, networktInterface := range item.networkIntefaces {
-			result, err := client.Get(ctx, item.resourceGroup, networktInterface, "")
+	niMap := make(map[string]Items)
+	for name, vm := range vmMap {
+		for _, networktInterface := range vm.array {
+			result, err := client.Get(ctx, vm.resourceGroup, networktInterface, "")
 			if err != nil {
 				fmt.Printf("Network Interface Error: %v\n", err)
 			} else {
@@ -102,6 +97,8 @@ func getNetworkInterface(authorizer autorest.Authorizer) {
 				fmt.Printf("Type: %v\n", *result.Type)
 				fmt.Printf("Location: %v\n", *result.Location)
 				fmt.Printf("ProvisionState: %v\n", result.ProvisioningState)
+
+				publicIpAddresses := []string {}
 				for _, inter := range *result.InterfacePropertiesFormat.IPConfigurations {
 					fmt.Printf("IpConfiguration Name: %v\n", *inter.Name)
 					fmt.Printf("IpConfiguration Private IP address: %v\n", *inter.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)
@@ -112,27 +109,66 @@ func getNetworkInterface(authorizer autorest.Authorizer) {
 					fmt.Printf("IpConfiguration Private IP address ID: %v\n", *inter.InterfaceIPConfigurationPropertiesFormat.Subnet.ID)
 
 					if inter.InterfaceIPConfigurationPropertiesFormat.PublicIPAddress != nil {
-						publicIpAddress := strings.Split(*inter.InterfaceIPConfigurationPropertiesFormat.PublicIPAddress.ID, "/")[publicIpAddressidx]
-						item.publicIpAddresses = append(item.publicIpAddresses, publicIpAddress)
-						itemMap[name] = item
+						publicIpAddress := strings.Split(*inter.InterfaceIPConfigurationPropertiesFormat.PublicIPAddress.ID, "/")[PublicIpAddressIdx]
+						publicIpAddresses = append(publicIpAddresses, publicIpAddress)
 					}
 				}
+				niMap[*result.Name] = Items{vm.resourceGroup, publicIpAddresses}
+
 				if result.Tags != nil {
 					for tag, value := range result.Tags {
 						fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 					}
-				}			}
+				}
+			}
 		}
 	}
+
+	return niMap
 }
 
-func getLoadBalancer(authorizer autorest.Authorizer) {
-	fmt.Printf("\n##########################\n##########################\n LOAD BALANCER\n##########################\n##########################\n")
-	client := network.NewLoadBalancersClient(subscriptionId)
+func getKubernetes(authorizer autorest.Authorizer) (map[string]Items) {
+	fmt.Printf("\n##########################\n##########################\n KUBERNETES\n##########################\n##########################\n")
+	client := containerservice.NewManagedClustersClient(os.Getenv(AzureSubscritpion))
 	client.Authorizer = authorizer
 	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
 	defer cancel()
 
+	kubernetesMap := make(map[string]Items)
+	resultList, err := client.List(ctx)
+	if err != nil {
+		fmt.Printf("Kubernetes Error: %v\n", err)
+	} else {
+		for _, result := range resultList.Values() {
+			fmt.Printf("##########################\nKubernetes Name: %v\n", *result.Name)
+			fmt.Printf("ID: %v\n", *result.ID)
+			fmt.Printf("Type: %v\n", *result.Type)
+			fmt.Printf("Location: %v\n", *result.Location)
+			fmt.Printf("Provision: %v\n", *result.ProvisioningState)
+			fmt.Printf("KubernetesVersion: %v\n", *result.ManagedClusterProperties.KubernetesVersion)
+			fmt.Printf("DNSPrefix: %v\n", *result.ManagedClusterProperties.DNSPrefix)
+			fmt.Printf("Fqdn: %v\n", *result.ManagedClusterProperties.Fqdn)
+			resourceGroup := *result.ManagedClusterProperties.NodeResourceGroup
+			fmt.Printf("NodeResourceGroup: %v\n", *result.ManagedClusterProperties.NodeResourceGroup)
+			fmt.Printf("PodCidr: %v\n", *result.ManagedClusterProperties.NetworkProfile.PodCidr)
+			fmt.Printf("ServiceCidr: %v\n", *result.ManagedClusterProperties.NetworkProfile.ServiceCidr)
+			fmt.Printf("DNSServiceIP: %v\n", *result.ManagedClusterProperties.NetworkProfile.DNSServiceIP)
+			fmt.Printf("DockerBridgeCidr: %v\n", *result.ManagedClusterProperties.NetworkProfile.DockerBridgeCidr)
+
+			kubernetesMap[*result.Name] = Items { resourceGroup, []string{}}
+		}
+	}
+	return kubernetesMap
+}
+
+func getLoadBalancer(authorizer autorest.Authorizer) (map[string]Items){
+	fmt.Printf("\n##########################\n##########################\n LOAD BALANCER\n##########################\n##########################\n")
+	client := network.NewLoadBalancersClient(os.Getenv(AzureSubscritpion))
+	client.Authorizer = authorizer
+	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
+	defer cancel()
+
+	niMap := make(map[string]Items)
 	resultList, err := client.ListAll(ctx)
 	if err != nil {
 		fmt.Printf("Load Balancer Error: %v\n", err)
@@ -143,22 +179,36 @@ func getLoadBalancer(authorizer autorest.Authorizer) {
 			fmt.Printf("Type: %v\n", *result.Type)
 			fmt.Printf("Location: %v\n", *result.Location)
 			fmt.Printf("ProvisionState: %v\n", result.ProvisioningState)
-			resourceGroup := strings.Split(*result.ID, "/")[resourceGroupIdx]
+			resourceGroup := strings.Split(*result.ID, "/")[ResourceGroupIdx]
 			fmt.Printf("Resource Group: %v\n", resourceGroup)
 
-			frontendList := []string {}
+			publicIpAddresses := []string {}
 			for _, frontend := range *result.LoadBalancerPropertiesFormat.FrontendIPConfigurations {
-				//	frontend := strings.Split(*(*result.FrontendIPConfigurations)[0].ID, "/")[frontendIdx]
-				tmp := strings.Split(*frontend.ID, "/")[frontendIdx]
-				frontendList = append(frontendList, tmp)
-				fmt.Printf("Frontend: %v\n", tmp)
+				fmt.Printf("Frontend ID: %v\n", *frontend.ID)
+				fmt.Printf("Frontend Type: %v\n", *frontend.Type)
+				if frontend.Subnet!= nil {
+					fmt.Printf("Frontend Subnet: %v\n", *frontend.Subnet.Name)
+				}
+				fmt.Printf("Frontend ProvisionState: %v\n", frontend.ProvisioningState)
 				if frontend.PrivateIPAddress != nil {
-					fmt.Printf("Private IP address: %v\n", *frontend.PrivateIPAddress)
+					fmt.Printf("Frontend Private IP address: %v\n", *frontend.PrivateIPAddress)
 				}
-				fmt.Printf("Private IP address version: %v\n", frontend.PrivateIPAddressVersion)
-				if frontend.Subnet != nil {
-					fmt.Printf("Private IP address version: %v\n", *frontend.Subnet.Name)
+				fmt.Printf("Frontend Private IP address verion: %v\n", frontend.PrivateIPAddressVersion)
+				fmt.Printf("Frontend Private IP address allocation: %v\n", frontend.PrivateIPAllocationMethod)
+
+				if frontend.Zones != nil {
+					for _, v := range *frontend.Zones {
+						fmt.Printf("Virtual Machine Zones: %v\n", v)
+					}
 				}
+
+				if frontend.PublicIPAddress != nil {
+					publicAddress := strings.Split(*frontend.PublicIPAddress.ID, "/")[PublicIpAddressIdx]
+					fmt.Printf("Frontend Public address: %v\n", publicAddress)
+					publicIpAddresses = append(publicIpAddresses, publicAddress)
+
+				}
+
 			}
 
 			if result.Tags != nil {
@@ -166,74 +216,140 @@ func getLoadBalancer(authorizer autorest.Authorizer) {
 					fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 				}
 			}
-			itemMap[*result.Name] = items { resourceGroup, []string{}, frontendList, []string{}, LOAD_BALANCE}
+			niMap[*result.Name] = Items { resourceGroup, publicIpAddresses}
 		}
 	}
+
+	return niMap
 }
 
-func getFrontend(authorizer autorest.Authorizer) {
-	fmt.Printf("\n##########################\n##########################\n FRONTEND\n##########################\n##########################\n")
-	client := network.NewLoadBalancerFrontendIPConfigurationsClient(subscriptionId)
+func getLoadBalancerByResourceGroup(authorizer autorest.Authorizer, kubernetesMap map[string]Items) (map[string]Items) {
+	fmt.Printf("\n##########################\n##########################\n LOAD BALANCER\n##########################\n##########################\n")
+	client := network.NewLoadBalancersClient(os.Getenv(AzureSubscritpion))
 	client.Authorizer = authorizer
 	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
 	defer cancel()
 
-	for name, item := range itemMap {
-		for _, frontend := range item.frontends {
-			result, err := client.Get(ctx, item.resourceGroup, name, frontend)
-			if err != nil {
-				fmt.Printf("Frontend Error: %v\n", err)
-			} else {
-				if result.ID != nil {
-					fmt.Printf("##########################\nFrontend Name: %v\n", *result.Name)
-					fmt.Printf("Loadbalance Name: %v\n", name)
-					fmt.Printf("ID: %v\n", *result.ID)
-					fmt.Printf("Type: %v\n", *result.Type)
-					if result.Subnet!= nil {
-						fmt.Printf("Subnet: %v\n", *result.Subnet.Name)
+	loadBalanceMap := make(map[string]Items)
+	for name, kubernetes := range kubernetesMap {
+		resultList, err := client.List(ctx, kubernetes.resourceGroup)
+		if err != nil {
+			fmt.Printf("Load Balancer Error: %v\n", err)
+		} else {
+			for _, result := range resultList.Values() {
+				fmt.Printf("##########################\nLoad Balancer Name: %v\n", *result.Name)
+				fmt.Printf("Kubernetes Name: %v\n", name)
+				fmt.Printf("ID: %v\n", *result.ID)
+				fmt.Printf("Type: %v\n", *result.Type)
+				fmt.Printf("Location: %v\n", *result.Location)
+				fmt.Printf("ProvisionState: %v\n", result.ProvisioningState)
+				resourceGroup := strings.Split(*result.ID, "/")[ResourceGroupIdx]
+				fmt.Printf("Resource Group: %v\n", resourceGroup)
+
+				publicIpAddresses := []string{}
+				for _, frontend := range *result.LoadBalancerPropertiesFormat.FrontendIPConfigurations {
+					fmt.Printf("Frontend ID: %v\n", *frontend.ID)
+					fmt.Printf("Frontend Type: %v\n", *frontend.Type)
+					if frontend.Subnet != nil {
+						fmt.Printf("Frontend Subnet: %v\n", *frontend.Subnet.Name)
 					}
-					fmt.Printf("ProvisionState: %v\n", result.ProvisioningState)
-					if result.PrivateIPAddress != nil {
-						fmt.Printf("IpConfiguration Public IP address: %v\n", *result.PrivateIPAddress)
+					fmt.Printf("Frontend ProvisionState: %v\n", frontend.ProvisioningState)
+					if frontend.PrivateIPAddress != nil {
+						fmt.Printf("Frontend Private IP address: %v\n", *frontend.PrivateIPAddress)
 					}
-					fmt.Printf("IpConfiguration Public IP address verion: %v\n", result.PrivateIPAddressVersion)
-					if result.Zones != nil {
-						for _, v := range *result.Zones {
+					fmt.Printf("Frontend Private IP address verion: %v\n", frontend.PrivateIPAddressVersion)
+					fmt.Printf("Frontend Private IP address allocation: %v\n", frontend.PrivateIPAllocationMethod)
+
+					if frontend.Zones != nil {
+						for _, v := range *frontend.Zones {
 							fmt.Printf("Virtual Machine Zones: %v\n", v)
 						}
 					}
 
-					if result.PublicIPAddress != nil {
-						publicAddress := strings.Split(*result.PublicIPAddress.ID, "/")[publicIpAddressidx]
-						fmt.Printf("Public address: %v\n", publicAddress)
-						item.publicIpAddresses = append(item.publicIpAddresses, publicAddress)
-
+					if frontend.PublicIPAddress != nil {
+						publicAddress := strings.Split(*frontend.PublicIPAddress.ID, "/")[PublicIpAddressIdx]
+						fmt.Printf("Frontend Public address: %v\n", publicAddress)
+						publicIpAddresses = append(publicIpAddresses, publicAddress)
 					}
 
-					itemMap[name] = item
+				}
+
+				if result.Tags != nil {
+					for tag, value := range result.Tags {
+						fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
+					}
+				}
+
+				loadBalanceMap[*result.Name] = Items{resourceGroup, publicIpAddresses}
+			}
+		}
+	}
+	return loadBalanceMap
+}
+
+func getLoadBalancerNetworkInterface(authorizer autorest.Authorizer, loadBalanceMap map[string]Items) {
+	fmt.Printf("\n##########################\n##########################\nLOAD BALANCER NETWORK INTERFACE\n##########################\n##########################\n")
+	client := network.NewLoadBalancerNetworkInterfacesClient(os.Getenv(AzureSubscritpion))
+	client.Authorizer = authorizer
+	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
+	defer cancel()
+
+	for name, item := range loadBalanceMap {
+		resultList, err := client.List(ctx, item.resourceGroup, name)
+		if err != nil {
+			fmt.Printf("Load Balancer Network Interface Error: %v\n", err)
+		} else {
+			for _, result := range resultList.Values() {
+				fmt.Printf("##########################\nLoad Balancer Network Interface Name: %v\n", *result.Name)
+				fmt.Printf("Kubernetes Name: %v\n", name)
+				fmt.Printf("ID: %v\n", *result.ID)
+				if result.Type != nil {
+					fmt.Printf("Type: %v\n", *result.Type)
+				}
+				if result.Location != nil {
+					fmt.Printf("Location: %v\n", *result.Location)
+				}
+				fmt.Printf("ProvisionState: %v\n", result.ProvisioningState)
+
+				for _, ipConfiguration := range *result.InterfacePropertiesFormat.IPConfigurations {
+					if ipConfiguration.PrivateIPAddress != nil {
+						fmt.Printf("IP Address: %v\n", *ipConfiguration.PrivateIPAddress)
+					}
+					fmt.Printf("IP Address Version: %v\n", ipConfiguration.PrivateIPAddressVersion)
+					fmt.Printf("IP Address Allocation: %v\n", ipConfiguration.PrivateIPAllocationMethod)
+					if ipConfiguration.Subnet != nil {
+						array := strings.Split(*ipConfiguration.ID, "/")
+						fmt.Printf("Network: %v\n", array[NetworkInterfaceIdx])
+						fmt.Printf("Subnet: %v\n", array[SubnetIdx])
+					}
+				}
+
+				if result.Tags != nil {
+					for tag, value := range result.Tags {
+						fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
+					}
 				}
 			}
 		}
 	}
 }
 
-func getPublicAddress(authorizer autorest.Authorizer) {
+func getPublicIpAddress(authorizer autorest.Authorizer, niMap map[string]Items) {
 	fmt.Printf("\n##########################\n##########################\n PUBLIC IP ADDRESS\n##########################\n##########################\n")
-	client := network.NewPublicIPAddressesClient(subscriptionId)
+	client := network.NewPublicIPAddressesClient(os.Getenv(AzureSubscritpion))
 	client.Authorizer = authorizer
 	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
 	defer cancel()
 
-	for name, item := range itemMap {
-		for _, publicIpAddress := range item.publicIpAddresses {
-			result, err := client.Get(ctx, item.resourceGroup, publicIpAddress, "")
+	for name, ni := range niMap {
+		for _, publicIpAddress := range ni.array {
+			result, err := client.Get(ctx, ni.resourceGroup, publicIpAddress, "")
 			if err != nil {
 				fmt.Printf("Public Ip Address Error: %v\n", err)
 			} else {
 				if result.ID != nil {
-					fmt.Println("##########################\nPublic IP Address")
-					fmt.Printf("Resource Name: %v\n", name)
-					fmt.Printf("Name: %v\n", *result.Name)
+					fmt.Printf("##########################\nPublic IP Address Name: %v\n", *result.Name)
+					fmt.Printf("Network Interface Name: %v\n", name)
 					fmt.Printf("ID: %v\n", *result.ID)
 					fmt.Printf("Type: %v\n", *result.Type)
 					fmt.Printf("Location: %v\n", *result.Location)
@@ -252,7 +368,8 @@ func getPublicAddress(authorizer autorest.Authorizer) {
 						for tag, value := range result.Tags {
 							fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 						}
-					}				}
+					}
+				}
 			}
 		}
 	}
@@ -260,7 +377,7 @@ func getPublicAddress(authorizer autorest.Authorizer) {
 
 func getVirtualNetwork(authorizer autorest.Authorizer) {
 	fmt.Printf("\n##########################\n##########################\n VIRTUAL NETWORK \n##########################\n##########################\n")
-	client := network.NewVirtualNetworksClient(subscriptionId)
+	client := network.NewVirtualNetworksClient(os.Getenv(AzureSubscritpion))
 	client.Authorizer = authorizer
 	ctx, cancel := context.WithTimeout(context.Background(), 6000*time.Second)
 	defer cancel()
@@ -270,13 +387,13 @@ func getVirtualNetwork(authorizer autorest.Authorizer) {
 		fmt.Printf("List of Virtual Network Error: %v\n", err)
 	} else {
 		for _, result := range resultList.Values() {
-			fmt.Printf("##########################\n Virtual Network Name: %v\n", *result.Name)
+			fmt.Printf("##########################\nVirtual Network Name: %v\n", *result.Name)
 			fmt.Printf("ID: %v\n", *result.ID)
 			fmt.Printf("Type: %v\n", *result.Type)
 			fmt.Printf("Location: %v\n", *result.Location)
 			fmt.Printf("ProvisionState: %v\n", result.ProvisioningState)
 
-			resourceGroup := strings.Split(*result.ID, "/")[resourceGroupIdx]
+			resourceGroup := strings.Split(*result.ID, "/")[ResourceGroupIdx]
 			fmt.Printf("Resource Group: %v\n", resourceGroup)
 
 			if result.Tags != nil {
@@ -287,13 +404,14 @@ func getVirtualNetwork(authorizer autorest.Authorizer) {
 
 			if result.VirtualNetworkPropertiesFormat.AddressSpace.AddressPrefixes != nil {
 				for _, addressPrefix := range *result.VirtualNetworkPropertiesFormat.AddressSpace.AddressPrefixes {
-					fmt.Printf("Subnet Address Prefix: %v\n", addressPrefix)
+					fmt.Printf("Address Prefix: %v\n", addressPrefix)
 
 				}
 			}
 
+			// SUBNET
 			for _, subnet := range *result.VirtualNetworkPropertiesFormat.Subnets {
-				fmt.Printf("Subnet Name: %v\n", *subnet.Name)
+				fmt.Printf("##########################\nSubnet Name: %v\n", *subnet.Name)
 				fmt.Printf("Subnet ID: %v\n", *subnet.ID)
 				if subnet.SubnetPropertiesFormat.AddressPrefixes != nil {
 					for _, addressPrefix := range *subnet.SubnetPropertiesFormat.AddressPrefixes {
@@ -305,14 +423,24 @@ func getVirtualNetwork(authorizer autorest.Authorizer) {
 					fmt.Printf("Subnet Address Prefix: %v\n", *subnet.SubnetPropertiesFormat.AddressPrefix)
 				}
 
-				fmt.Printf("Address Prefix: %v\n", subnet.SubnetPropertiesFormat.ProvisioningState)
+				if subnet.SubnetPropertiesFormat.NetworkSecurityGroup != nil {
+					if subnet.SubnetPropertiesFormat.NetworkSecurityGroup.Name != nil{
+						fmt.Printf("SecurityGroup Name: %v\n", *subnet.SubnetPropertiesFormat.NetworkSecurityGroup.Name)
+					}
+					if subnet.SubnetPropertiesFormat.NetworkSecurityGroup.ID != nil{
+						securityGroupId := strings.Split(*subnet.SubnetPropertiesFormat.NetworkSecurityGroup.ID, "/")[SecurityGroupIdx]
+						fmt.Printf("SecurityGroup Id: %v\n", securityGroupId)
+					}
+				}
+
+				fmt.Printf("ProvisioningState: %v\n", subnet.SubnetPropertiesFormat.ProvisioningState)
 			}
 
 		}
 	}
 }
 
-func getDNS(authorizer autorest.Authorizer) {
+func getDNS(authorizer autorest.Authorizer, subscriptionId string, itemMap map[string]Items) {
 	fmt.Printf("\n##########################\n##########################\n DNS \n##########################\n##########################\n")
 	// DNS ZONES
 	dnsClient := dns.NewZonesClient(subscriptionId)
@@ -331,13 +459,13 @@ func getDNS(authorizer autorest.Authorizer) {
 			fmt.Printf("##########################\nZone Name: %v\n", *result.Name)
 			fmt.Printf("Zone Id: %v\n", *result.ID)
 			array := strings.Split(*result.ID, "/")
-			fmt.Printf("Zone Resource Group#: %v\n", array[resourceGroupIdx])
+			fmt.Printf("Zone Resource Group#: %v\n", array[ResourceGroupIdx])
 			if result.Tags != nil {
 				for tag, value := range result.Tags {
 					fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 				}
 			}
-			dnsMap[*result.Name] = array[resourceGroupIdx]
+			dnsMap[*result.Name] = array[ResourceGroupIdx]
 		}
 	}
 
@@ -417,7 +545,7 @@ func getDNS(authorizer autorest.Authorizer) {
 	}
 }
 
-func getPrivateDNS(authorizer autorest.Authorizer) {
+func getPrivateDNS(authorizer autorest.Authorizer, subscriptionId string, itemMap map[string]Items) {
 	fmt.Printf("\n##########################\n##########################\n PRIVATE DNS \n##########################\n##########################\n")
 	// PRIVATE DNS ZONES
 	dnsPrivateClient := privatedns.NewPrivateZonesClient(subscriptionId)
@@ -434,14 +562,14 @@ func getPrivateDNS(authorizer autorest.Authorizer) {
 		fmt.Printf("##########################\nZone Name: %v\n", *result.Name)
 		fmt.Printf("Zone Id: %v\n", *result.ID)
 		array := strings.Split(*result.ID, "/")
-		fmt.Printf("Zone Resource Group#: %v\n", array[resourceGroupIdx])
+		fmt.Printf("Zone Resource Group#: %v\n", array[ResourceGroupIdx])
 		if result.Tags != nil {
 			for tag, value := range result.Tags {
 				fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 			}
 		}
 
-		dnsMap[*result.Name] = array[resourceGroupIdx]
+		dnsMap[*result.Name] = array[ResourceGroupIdx]
 	}
 
 	// DNS RECORDS
@@ -522,22 +650,47 @@ func getPrivateDNS(authorizer autorest.Authorizer) {
 	}
 }
 
+func getAllVirtualMachine(authorizer autorest.Authorizer) {
+
+	vmMap := getVirtualMachine(authorizer)
+	niMap := getNetworkInterface(authorizer, vmMap)
+	getPublicIpAddress(authorizer, niMap)
+}
+
+func getAllLoadBalancer(authorizer autorest.Authorizer) {
+
+	niMap := getLoadBalancer(authorizer)
+	getPublicIpAddress(authorizer, niMap)
+}
+
+func getAllDNS(authorizer autorest.Authorizer) {
+	subscriptionId := os.Getenv(AzureSubscritpion)
+	itemMap := make(map[string]Items)
+
+	getDNS(authorizer, subscriptionId, itemMap)
+	getPrivateDNS(authorizer, subscriptionId, itemMap)
+}
+
+func getAllKubernetes(authorizer autorest.Authorizer) {
+
+	kubernetesMap := getKubernetes(authorizer)
+	loadBalanceMap := getLoadBalancerByResourceGroup(authorizer, kubernetesMap)
+	getLoadBalancerNetworkInterface(authorizer, loadBalanceMap)
+	getPublicIpAddress(authorizer, loadBalanceMap)
+}
+
 func main() {
 
 	fmt.Println("Starting")
 	authorizer, err := auth.NewAuthorizerFromEnvironment()
-	subscriptionId = os.Getenv(AZURE_SUBSCRITPION)
 
 	if err != nil {
 		fmt.Printf("Authorization Error: %v\n", err)
 	} else {
-		getVirtualMachine(authorizer)
-		getNetworkInterface(authorizer)
-		getLoadBalancer(authorizer)
-		getFrontend(authorizer)
-		getPublicAddress(authorizer)
+		getAllVirtualMachine(authorizer)
+		getAllLoadBalancer(authorizer)
+		getAllKubernetes(authorizer)
 		getVirtualNetwork(authorizer)
-		getDNS(authorizer)
-		getPrivateDNS(authorizer)
+		getAllDNS(authorizer)
 	}
 }
