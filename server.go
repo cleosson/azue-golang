@@ -68,6 +68,9 @@ func getVirtualMachine(authorizer autorest.Authorizer) (map[string]Items){
 					fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 				}
 			}
+			fmt.Printf("VM Size: %v\n", result.VirtualMachineProperties.HardwareProfile.VMSize)
+			fmt.Printf("OS: %v\n", *result.VirtualMachineProperties.StorageProfile.ImageReference.Offer)
+			fmt.Printf("OS version: %v\n", *result.VirtualMachineProperties.StorageProfile.ImageReference.Sku)
 
 			vmMap[*result.Name] = Items { resourceGroup, networkInterfaceList}
 		}
@@ -402,10 +405,15 @@ func getVirtualNetwork(authorizer autorest.Authorizer) {
 				}
 			}
 
+			if result.VirtualNetworkPropertiesFormat.DhcpOptions != nil {
+				for _, dnsServers := range *result.VirtualNetworkPropertiesFormat.DhcpOptions.DNSServers {
+					fmt.Printf("DNS Servers: %v\n", dnsServers)
+				}
+			}
+
 			if result.VirtualNetworkPropertiesFormat.AddressSpace.AddressPrefixes != nil {
 				for _, addressPrefix := range *result.VirtualNetworkPropertiesFormat.AddressSpace.AddressPrefixes {
 					fmt.Printf("Address Prefix: %v\n", addressPrefix)
-
 				}
 			}
 
@@ -416,7 +424,6 @@ func getVirtualNetwork(authorizer autorest.Authorizer) {
 				if subnet.SubnetPropertiesFormat.AddressPrefixes != nil {
 					for _, addressPrefix := range *subnet.SubnetPropertiesFormat.AddressPrefixes {
 						fmt.Printf("Subnet Address Prefix: %v\n", addressPrefix)
-
 					}
 				}
 				if subnet.SubnetPropertiesFormat.AddressPrefix != nil {
@@ -432,18 +439,16 @@ func getVirtualNetwork(authorizer autorest.Authorizer) {
 						fmt.Printf("SecurityGroup Id: %v\n", securityGroupId)
 					}
 				}
-
 				fmt.Printf("ProvisioningState: %v\n", subnet.SubnetPropertiesFormat.ProvisioningState)
 			}
-
 		}
 	}
 }
 
-func getDNS(authorizer autorest.Authorizer, subscriptionId string, itemMap map[string]Items) {
+func getDNS(authorizer autorest.Authorizer) {
 	fmt.Printf("\n##########################\n##########################\n DNS \n##########################\n##########################\n")
 	// DNS ZONES
-	dnsClient := dns.NewZonesClient(subscriptionId)
+	dnsClient := dns.NewZonesClient(os.Getenv(AzureSubscritpion))
 	dnsClient.Authorizer = authorizer
 	dnsMap := make(map[string]string)
 
@@ -470,7 +475,7 @@ func getDNS(authorizer autorest.Authorizer, subscriptionId string, itemMap map[s
 	}
 
 	// DNS RECORDS
-	recordsClient := dns.NewRecordSetsClient(subscriptionId)
+	recordsClient := dns.NewRecordSetsClient(os.Getenv(AzureSubscritpion))
 	recordsClient.Authorizer = authorizer
 
 	ctx, cancel = context.WithTimeout(context.Background(), 6000*time.Second)
@@ -545,10 +550,10 @@ func getDNS(authorizer autorest.Authorizer, subscriptionId string, itemMap map[s
 	}
 }
 
-func getPrivateDNS(authorizer autorest.Authorizer, subscriptionId string, itemMap map[string]Items) {
+func getPrivateDNS(authorizer autorest.Authorizer) {
 	fmt.Printf("\n##########################\n##########################\n PRIVATE DNS \n##########################\n##########################\n")
 	// PRIVATE DNS ZONES
-	dnsPrivateClient := privatedns.NewPrivateZonesClient(subscriptionId)
+	dnsPrivateClient := privatedns.NewPrivateZonesClient(os.Getenv(AzureSubscritpion))
 	dnsPrivateClient.Authorizer = authorizer
 	dnsMap := make(map[string]string)
 
@@ -568,12 +573,11 @@ func getPrivateDNS(authorizer autorest.Authorizer, subscriptionId string, itemMa
 				fmt.Printf("Tags: tag[%v], value[%v]\n", tag, *value)
 			}
 		}
-
 		dnsMap[*result.Name] = array[ResourceGroupIdx]
 	}
 
 	// DNS RECORDS
-	privateRecordsClient := privatedns.NewRecordSetsClient(subscriptionId)
+	privateRecordsClient := privatedns.NewRecordSetsClient(os.Getenv(AzureSubscritpion))
 	privateRecordsClient.Authorizer = authorizer
 
 	ctx, cancel = context.WithTimeout(context.Background(), 6000*time.Second)
@@ -642,7 +646,6 @@ func getPrivateDNS(authorizer autorest.Authorizer, subscriptionId string, itemMa
 				if record.RecordSetProperties.TxtRecords != nil {
 					for _, value := range *record.RecordSetProperties.TxtRecords {
 						fmt.Printf("Record ARecords: %v\n", *value.Value)
-
 					}
 				}
 			}
@@ -651,28 +654,22 @@ func getPrivateDNS(authorizer autorest.Authorizer, subscriptionId string, itemMa
 }
 
 func getAllVirtualMachine(authorizer autorest.Authorizer) {
-
 	vmMap := getVirtualMachine(authorizer)
 	niMap := getNetworkInterface(authorizer, vmMap)
 	getPublicIpAddress(authorizer, niMap)
 }
 
 func getAllLoadBalancer(authorizer autorest.Authorizer) {
-
 	niMap := getLoadBalancer(authorizer)
 	getPublicIpAddress(authorizer, niMap)
 }
 
 func getAllDNS(authorizer autorest.Authorizer) {
-	subscriptionId := os.Getenv(AzureSubscritpion)
-	itemMap := make(map[string]Items)
-
-	getDNS(authorizer, subscriptionId, itemMap)
-	getPrivateDNS(authorizer, subscriptionId, itemMap)
+	getDNS(authorizer)
+	getPrivateDNS(authorizer)
 }
 
 func getAllKubernetes(authorizer autorest.Authorizer) {
-
 	kubernetesMap := getKubernetes(authorizer)
 	loadBalanceMap := getLoadBalancerByResourceGroup(authorizer, kubernetesMap)
 	getLoadBalancerNetworkInterface(authorizer, loadBalanceMap)
@@ -680,7 +677,6 @@ func getAllKubernetes(authorizer autorest.Authorizer) {
 }
 
 func main() {
-
 	fmt.Println("Starting")
 	authorizer, err := auth.NewAuthorizerFromEnvironment()
 
